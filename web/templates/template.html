@@ -1,0 +1,36 @@
+<html>
+    <head>
+        <title>VMIFactory</title>
+        <link rel="stylesheet" href="/static/css/main.css">
+    </head>
+    <body>
+        {{ range . }}
+            <div>
+                <h2>{{ .Name }}</h2>
+                <p>{{ .Description }}</p>
+                <table>
+                    <tr>
+                        <th>Username</th><td>{{index .Login "username" }}</td>
+                    </tr>
+                    <tr>
+                        <th>Password</th><td>{{index .Login "password" }}</td>
+                    </tr>
+                    <tr>
+                        <th>Sudo Password</th><td>{{index .Login "sudo_password" }}</td>
+                    </tr> 
+                </table>
+                <table>
+                    <tr>
+                        <th>VirtualBox Image</th><td>{{index .Login "username" }}</td>
+                    </tr>
+                    <tr>
+                        <th>Password</th><td>{{index .Login "password" }}</td>
+                    </tr>
+                    <tr>
+                        <th>Sudo Password</th><td>{{index .Login "sudo_password" }}</td>
+                    </tr> 
+                </table>
+            </div>
+        {{ end }}
+    </body>
+</html>

@@ -1,0 +1,8 @@
+*.ova
+packer_cache/
+
+images/*
+!images/.keep
+packer
+vmif-run
+vmif-web
