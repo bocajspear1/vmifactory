@@ -4,7 +4,11 @@
         <link rel="stylesheet" href="/static/css/main.css">
     </head>
     <body>
-        {{ range . }}
+        <header>
+                VMIFactory
+        </header>
+        <main>
+            {{ range . }}
             <div>
                 <h2>{{ .Name }}</h2>
                 <p>{{ .Description }}</p>
@@ -19,18 +23,72 @@
                         <th>Sudo Password</th><td>{{index .Login "sudo_password" }}</td>
                     </tr> 
                 </table>
-                <table>
-                    <tr>
-                        <th>VirtualBox Image</th><td>{{index .Login "username" }}</td>
-                    </tr>
-                    <tr>
-                        <th>Password</th><td>{{index .Login "password" }}</td>
-                    </tr>
-                    <tr>
-                        <th>Sudo Password</th><td>{{index .Login "sudo_password" }}</td>
-                    </tr> 
-                </table>
+                {{ if not (index .Metadata "in_progress") }}
+                <div class="imagefiles">
+                    {{ if index .Out "vbox" }} 
+                        <h4>VirtualBox</h4>
+                        <table class="imagefile-table">
+                            <tr>
+                                <th>Image File</th>
+                                <th>Build Date</th>
+                                <th>SHA256 Hash</th>
+                            </tr>
+                            {{ if index .Metadata "vbox_current_hash" }}
+                                <tr>
+                                    <td><a href='get/{{ index .Metadata "image_path_name" }}/{{ index .Out "vbox" }}'>{{ index .Out "vbox" }}</a></td>
+                                    <td>{{index .Metadata "vbox_current_date" }}</td>
+                                    <td>{{index .Metadata "vbox_current_hash" }}</td>
+                                </tr>
+                                {{ if index .Metadata "vbox_last_hash" }}
+                                    <tr>
+                                            <td><a href='get/{{ index .Metadata "image_path_name" }}/Old-{{ index .Out "vbox" }}'>Old-{{ index .Out "vbox" }}</a></td>
+                                        <td>{{index .Metadata "vbox_last_date" }}</td>
+                                        <td>{{index .Metadata "vbox_last_hash" }}</td>
+                                    </tr>
+                                {{ end }}
+                            {{ end }}
+                        </table>
+                    {{ end }}
+                    {{if index .Out "kvm" }} 
+                        <h4>KVM/QEMU</h4>
+                        <table class="imagefile-table">
+                            <tr>
+                                <th>Image File</th>
+                                <th>Build Date</th>
+                                <th>SHA256 Hash</th>
+                            </tr>
+                            {{ if index .Metadata "kvm_current_hash" }}
+                                <tr>
+                                    <td><a href='get/{{ index .Metadata "image_path_name" }}/{{ index .Out "kvm" }}'>{{ index .Out "kvm" }}</a></td>
+                                    <td>{{index .Metadata "kvm_current_date" }}</td>
+                                    <td>{{index .Metadata "kvm_current_hash" }}</td>
+                                </tr>
+                                {{ if index .Metadata "kvm_last_hash" }}
+                                    <tr>
+                                            <td><a href='get/{{ index .Metadata "image_path_name" }}/Old-{{ index .Out "kvm" }}'>Old-{{ index .Out "kvm" }}</a></td>
+                                        <td>{{index .Metadata "kvm_last_date" }}</td>
+                                        <td>{{index .Metadata "kvm_last_hash" }}</td>
+                                    </tr>
+                                {{ end }}
+                            {{ end }}
+                        </table>
+                    {{end}}
+                    {{if index .Out "hyperv" }} 
+                        <h4>HyperV</h4>
+                    {{end}}
+                    
+                    {{if index .Out "vmware" }} 
+                        <h4>VMWare</h4>
+                    {{end}}
+                </div>
+                {{ else }}
+                <div class="inprogress">
+                    This image is being updated, please check back later...
+                </div>
+                {{ end }}
             </div>
         {{ end }}
+        </main>
+        
     </body>
 </html>

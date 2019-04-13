@@ -16,9 +16,14 @@ func main() {
 	}
 	fmt.Println(image.Exists())
 	image.PrepareBuild()
-	runerr := image.RunBuild()
+	runerr := image.RunBuild(false, true)
 	if runerr != nil {
 		fmt.Println(runerr)
+		return
+	}
+	commiterr := image.CommitBuild()
+	if commiterr != nil {
+		fmt.Println(commiterr)
 		return
 	}
 }

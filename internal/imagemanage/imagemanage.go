@@ -7,30 +7,13 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
-
-func copyFile(src string, dst string) error {
-
-	source, oerr := os.Open(src)
-	if oerr != nil {
-		return oerr
-	}
-	defer source.Close()
-
-	fmt.Println(dst)
-	destination, cerr := os.Create(dst)
-	if cerr != nil {
-		return cerr
-	}
-	defer destination.Close()
-	_, copyerr := io.Copy(destination, source)
-	fmt.Println("hi")
-	return copyerr
-}
 
 // GetAvailableImages returns a list of images
 func GetAvailableImages(path string) []string {
@@ -57,7 +40,7 @@ type BuilderConfig struct {
 	Login       map[string]string `json:"login"`
 	Source      map[string]string `json:"source"`
 	Out         map[string]string `json:"out"`
-	Hashes      map[string]string `json:"hashes"`
+	Metadata    map[string]string `json:"metadata"`
 }
 
 // VMImage represents an image and its config.
@@ -80,8 +63,17 @@ func (v VMImage) parseJSON() (*BuilderConfig, error) {
 	if jerr != nil {
 		return nil, jerr
 	}
-	fmt.Println(config)
+
 	return &config, nil
+}
+
+func (v VMImage) saveJSON() error {
+	newConfig, merr := json.MarshalIndent(v.Config, "", "    ")
+	if merr != nil {
+		return merr
+	}
+	err := ioutil.WriteFile(v.GetConfigPath(), newConfig, 0644)
+	return err
 }
 
 // Generate the config
@@ -137,7 +129,20 @@ func (v VMImage) generatePackerConfig() (string, error) {
 		return "", errors.New("Could not list the run directory for the image")
 	}
 
-	scripts := make([]string, len(runScripts))
+	runOnceScripts, err := ioutil.ReadDir(v.GetRunOncePath())
+	if err != nil {
+		return "", errors.New("Could not list the runOnce directory for the image")
+	}
+
+	runOnceCount := len(runOnceScripts) - 1
+
+	scripts := make([]string, (len(runScripts) + runOnceCount))
+
+	for i := 0; i < len(runOnceScripts); i++ {
+		if !(runOnceScripts[i].IsDir()) {
+			scripts[i] = v.GetRunPath() + "/" + runOnceScripts[i].Name()
+		}
+	}
 
 	for i := 0; i < len(runScripts); i++ {
 		scripts[i] = v.GetRunPath() + "/" + runScripts[i].Name()
@@ -171,7 +176,7 @@ func NewVMImage(path string, imageName string) (*VMImage, error) {
 
 	config, cerr := p.parseJSON()
 	p.Config = config
-	fmt.Println(p.Config)
+
 	if cerr != nil {
 		return nil, cerr
 	}
@@ -205,6 +210,36 @@ func (v VMImage) GetRunOncePath() string {
 	return v.ImageRootDir + "/runonce"
 }
 
+// GetCommitFlag returns the path to commit flag
+func (v VMImage) GetCommitFlag() string {
+	return v.GetWorkDirPath() + "/commit"
+}
+
+// CommitFlagExists checks if the image commit flag exists
+func (v VMImage) CommitFlagExists() bool {
+	_, err := os.Stat(v.GetCommitFlag())
+	return err == nil
+}
+
+func (v VMImage) EnableCommitFlag() bool {
+	newFile, err := os.Create(v.GetCommitFlag())
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+	defer newFile.Close()
+	newFile.WriteString("commit!")
+	return true
+}
+
+func (v VMImage) DisableCommitFlag() bool {
+	if v.CommitFlagExists() {
+		os.Remove(v.GetCommitFlag())
+		return true
+	}
+	return false
+}
+
 // PrepareBuild prepares the image for an update build
 func (v VMImage) PrepareBuild() bool {
 	workDir := v.GetWorkDirPath()
@@ -212,7 +247,7 @@ func (v VMImage) PrepareBuild() bool {
 
 	// Remove the old work directory
 	if err == nil {
-		fmt.Println("Removing old work directory...")
+		log.Println("Removing old work directory...")
 		os.RemoveAll(workDir)
 	}
 
@@ -221,13 +256,15 @@ func (v VMImage) PrepareBuild() bool {
 	return true
 }
 
-func (v VMImage) RunBuild() error {
+// RunBuild runs the build
+func (v VMImage) RunBuild(testRun bool, skipBuild bool) error {
 
 	// Generate the Packer config
 	config, cerr := v.generatePackerConfig()
 	if cerr != nil {
 		return cerr
 	}
+	log.Println("Packer config generated...")
 
 	configFile := v.GetWorkDirPath() + "/builtpacker.json"
 	ioutil.WriteFile(configFile, []byte(config), 0755)
@@ -247,21 +284,36 @@ func (v VMImage) RunBuild() error {
 	// Copy in the current image file into the work directory
 	if builderString == "vbox" {
 		copyerr = copyFile(v.ImageRootDir+"/"+imagefilePath, v.GetWorkDirPath()+"/original.ova")
+	} else {
+		return errors.New(builderString + " not currently supported")
 	}
 
 	if copyerr != nil {
 		return copyerr
 	}
 
-	// Run the build
-	cwd, _ := os.Getwd()
+	// Check if we want to sckip the build, usually for testing
+	if !skipBuild {
+		log.Println("Starting Packer build...")
+		// Run the build
+		cwd, _ := os.Getwd()
 
-	cmd := exec.Command(cwd+"/packer", "build", configFile)
-	output, err := cmd.Output()
-	if err != nil {
-		return err
+		cmd := exec.Command(cwd+"/packer", "build", configFile)
+		output, err := cmd.Output()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s", output)
+	} else {
+		log.Println("!!! - Faking Packer build...")
+		// Manually create and fill the output directory
+		os.Mkdir(v.GetWorkDirPath()+"/packer-out", 0777)
+		if builderString == "vbox" {
+			originalPath := v.GetWorkDirPath() + "/original.ova"
+			fakingPath := v.GetWorkDirPath() + "/packer-out/" + v.ImageName + "-vmifactory.ova"
+			copyerr = copyFile(originalPath, fakingPath)
+		}
 	}
-	fmt.Printf("%s", output)
 
 	// Convert the outputs
 	if builderString == "vbox" {
@@ -309,8 +361,13 @@ func (v VMImage) RunBuild() error {
 		// Do conversion for KVM
 		kvmName, ok := v.Config.Out["kvm"]
 		if ok && kvmName != "" {
-			for _, diskFile := range ovaDisks {
+			log.Println("Doing KVM conversion...")
+			convertedList := make([]string, len(ovaDisks))
+			log.Println("(KVM) Converting disks...")
+			// For each disk, make a QCOW2 copy
+			for i, diskFile := range ovaDisks {
 				newName := strings.ReplaceAll(diskFile.Name(), ".vmdk", ".qcow2")
+				convertedList[i] = disksDir + "/" + newName
 				cmd := exec.Command("qemu-img", "convert", "-O", "qcow2", disksDir+"/"+diskFile.Name(), disksDir+"/"+newName)
 				convertOut, err := cmd.Output()
 				if err != nil {
@@ -318,10 +375,103 @@ func (v VMImage) RunBuild() error {
 				}
 				fmt.Printf("%s", convertOut)
 			}
+			log.Println("(KVM) Building Gzipped Tar...")
+			// Tar and gzip the QCOW2 files
+			packErr := tarAndGzipFiles(convertedList, v.GetWorkDirPath()+"/"+kvmName)
+			if packErr != nil {
+				return packErr
+			}
 		}
 
 	}
+	log.Println("Conversions completed...")
 
-	// os.RemoveAll(workDir)
+	realName, ok := v.Config.Source["imagefile"]
+	if !ok {
+		return errors.New("Required key 'source'.'imagefile' not found")
+	}
+	os.Rename(v.GetWorkDirPath()+"/original.ova", v.GetWorkDirPath()+"/"+realName)
+	log.Println("Renamed original file...")
 	return nil
+}
+
+// CommitBuild updates the image files and metadata
+func (v VMImage) CommitBuild() error {
+	v.EnableCommitFlag()
+	// Ensure our source image file is the same as its out file name
+	imagefileName, ok := v.Config.Source["imagefile"]
+	if !ok {
+		return errors.New("Required key 'source'.'imagefile' not found")
+	}
+	sourceType, ok := v.Config.Source["hypervisor"]
+	if !ok {
+		return errors.New("Required key 'source'.'hypervisor' not found")
+	}
+	v.Config.Out[sourceType] = imagefileName
+
+	log.Println("Updating metadata and moving files...")
+
+	for hypervisor, outFileName := range v.Config.Out {
+		if outFileName != "" {
+
+			oldImagefilePath := v.ImageRootDir + "/Old-" + outFileName
+			currentImagefilePath := v.ImageRootDir + "/" + outFileName
+			newImagefilePath := v.GetWorkDirPath() + "/" + outFileName
+
+			currentHash, ok := v.Config.Metadata[hypervisor+"_current_hash"]
+			if ok {
+				v.Config.Metadata[hypervisor+"_last_hash"] = currentHash
+			} else {
+				v.Config.Metadata[hypervisor+"_last_hash"] = ""
+			}
+			currentBuildDate, ok := v.Config.Metadata[hypervisor+"_current_date"]
+			if ok {
+				v.Config.Metadata[hypervisor+"_last_date"] = currentBuildDate
+			} else {
+				v.Config.Metadata[hypervisor+"_last_date"] = ""
+			}
+			fileHash, err := getFileSHA256(newImagefilePath)
+			if err != nil {
+				return err
+			}
+			v.Config.Metadata[hypervisor+"_current_hash"] = fileHash
+			dt := time.Now()
+			//
+			v.Config.Metadata[hypervisor+"_current_date"] = dt.Format("2006-01-02 15:04:05")
+			fmt.Println(v.Config.Metadata)
+
+			// Remove the old image if it exists
+			_, err = os.Stat(oldImagefilePath)
+			if err == nil {
+				os.Remove(oldImagefilePath)
+			}
+
+			// Move the existing to the Old- name
+			_, err = os.Stat(currentImagefilePath)
+			if err == nil {
+				os.Rename(currentImagefilePath, oldImagefilePath)
+			}
+
+			// Move the new to the current path
+			os.Rename(newImagefilePath, currentImagefilePath)
+
+		}
+		v.saveJSON()
+		v.DisableCommitFlag()
+	}
+
+	return nil
+}
+
+// FinishBuild finishes the build by removing the working directory. The web app will now consider the image available.
+func (v VMImage) FinishBuild() bool {
+	workDir := v.GetWorkDirPath()
+	_, err := os.Stat(workDir)
+
+	// Remove the work directory
+	if err == nil {
+		log.Println("Removing work directory and completing build...")
+		os.RemoveAll(workDir)
+	}
+	return true
 }
