@@ -1,29 +1,78 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"fmt"
+	"strings"
 
 	"github.com/bocajspear1/vmifactory/internal/imagemanage"
 )
 
-func main() {
-	images := imagemanage.GetAvailableImages("./images")
-	fmt.Println(images)
-	image, ierr := imagemanage.NewVMImage("./images", "test-image")
-	if ierr != nil {
-		fmt.Println(ierr)
-		return
+func runImageBuild(image *imagemanage.VMImage, testBuild bool, noCommit bool) error {
+	if !image.Exists() {
+		return errors.New("Image '" + image.ImageName + "' does not exist or is not properly configured")
 	}
-	fmt.Println(image.Exists())
 	image.PrepareBuild()
-	runerr := image.RunBuild(false, true)
+	runerr := image.RunBuild(testBuild)
 	if runerr != nil {
-		fmt.Println(runerr)
+		return runerr
+	}
+	if !noCommit {
+		commiterr := image.CommitBuild()
+		if commiterr != nil {
+			return commiterr
+		}
+	}
+
+	return nil
+}
+
+func main() {
+
+	const IMAGEDIR string = "./images"
+
+	var noCommit = flag.Bool("nocommit", false, "Do not commit the images to be used. Useful for testing the images before distribution.")
+	var testBuild = flag.Bool("test", false, "Don't actually do the build, useful for testing post-processing")
+	var listImages = flag.Bool("list", false, "List the known available images")
+	var runBuild = flag.String("run", "", "Set to run only one build instead of them all")
+
+	flag.Parse()
+
+	if *runBuild != "" {
+		filteredImage := strings.ReplaceAll(*runBuild, ".", "")
+		image, ierr := imagemanage.NewVMImage(IMAGEDIR, filteredImage)
+		if ierr != nil {
+			fmt.Println("Error finding image '" + filteredImage + "'")
+			fmt.Println(ierr)
+			return
+		}
+		fmt.Println("Running '" + image.Config.Name + "'")
+		berr := runImageBuild(image, *testBuild, *noCommit)
+		if berr != nil {
+			fmt.Println(ierr)
+			return
+		}
 		return
 	}
-	commiterr := image.CommitBuild()
-	if commiterr != nil {
-		fmt.Println(commiterr)
-		return
+
+	images := imagemanage.GetAvailableImages(IMAGEDIR)
+
+	for _, imagePath := range images {
+		image, ierr := imagemanage.NewVMImage(IMAGEDIR, imagePath)
+		if ierr != nil {
+			fmt.Println(ierr)
+			return
+		}
+		if *listImages {
+			fmt.Println(image.ImageName + " - " + image.Config.Name)
+		} else {
+			runerr := runImageBuild(image, *testBuild, *noCommit)
+			if runerr != nil {
+				fmt.Println(ierr)
+				return
+			}
+		}
 	}
+
 }

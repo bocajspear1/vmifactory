@@ -257,7 +257,7 @@ func (v VMImage) PrepareBuild() bool {
 }
 
 // RunBuild runs the build
-func (v VMImage) RunBuild(testRun bool, skipBuild bool) error {
+func (v VMImage) RunBuild(skipBuild bool) error {
 
 	// Generate the Packer config
 	config, cerr := v.generatePackerConfig()
@@ -300,10 +300,15 @@ func (v VMImage) RunBuild(testRun bool, skipBuild bool) error {
 
 		cmd := exec.Command(cwd+"/packer", "build", configFile)
 		output, err := cmd.Output()
+		ferr := ioutil.WriteFile(v.GetWorkDirPath()+"/packer.log", output, 0644)
 		if err != nil {
 			return err
 		}
+		if ferr != nil {
+			return ferr
+		}
 		fmt.Printf("%s", output)
+
 	} else {
 		log.Println("!!! - Faking Packer build...")
 		// Manually create and fill the output directory
@@ -438,7 +443,6 @@ func (v VMImage) CommitBuild() error {
 			dt := time.Now()
 			//
 			v.Config.Metadata[hypervisor+"_current_date"] = dt.Format("2006-01-02 15:04:05")
-			fmt.Println(v.Config.Metadata)
 
 			// Remove the old image if it exists
 			_, err = os.Stat(oldImagefilePath)
@@ -461,17 +465,4 @@ func (v VMImage) CommitBuild() error {
 	}
 
 	return nil
-}
-
-// FinishBuild finishes the build by removing the working directory. The web app will now consider the image available.
-func (v VMImage) FinishBuild() bool {
-	workDir := v.GetWorkDirPath()
-	_, err := os.Stat(workDir)
-
-	// Remove the work directory
-	if err == nil {
-		log.Println("Removing work directory and completing build...")
-		os.RemoveAll(workDir)
-	}
-	return true
 }
