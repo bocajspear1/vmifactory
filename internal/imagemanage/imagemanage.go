@@ -135,21 +135,24 @@ func (v VMImage) generatePackerConfig() (string, error) {
 	}
 
 	runOnceCount := len(runOnceScripts) - 1
-
-	scripts := make([]string, (len(runScripts) + runOnceCount))
+	runOnceFull := make([]string, runOnceCount)
 
 	for i := 0; i < len(runOnceScripts); i++ {
 		if !(runOnceScripts[i].IsDir()) {
-			scripts[i] = v.GetRunPath() + "/" + runOnceScripts[i].Name()
+			runOnceFull[i] = v.GetRunOncePath() + "/" + runOnceScripts[i].Name()
 		}
 	}
 
+	runFull := make([]string, len(runScripts))
+
 	for i := 0; i < len(runScripts); i++ {
-		scripts[i] = v.GetRunPath() + "/" + runScripts[i].Name()
+		runFull[i] = v.GetRunPath() + "/" + runScripts[i].Name()
 	}
 
+	allScripts := append(runOnceFull, runFull...)
+
 	provisionersOut["type"] = "shell"
-	provisionersOut["scripts"] = scripts
+	provisionersOut["scripts"] = allScripts
 
 	str.Reset()
 	str.WriteString("echo '")
@@ -281,7 +284,7 @@ func (v VMImage) RunBuild(skipBuild bool) error {
 
 	var copyerr error
 
-	// Copy in the current image file into the work directory
+	// Copy in the current image file into the work directory as our working copy
 	if builderString == "vbox" {
 		copyerr = copyFile(v.ImageRootDir+"/"+imagefilePath, v.GetWorkDirPath()+"/original.ova")
 	} else {
@@ -292,7 +295,7 @@ func (v VMImage) RunBuild(skipBuild bool) error {
 		return copyerr
 	}
 
-	// Check if we want to sckip the build, usually for testing
+	// Check if we want to skip the build, usually for testing
 	if !skipBuild {
 		log.Println("Starting Packer build...")
 		// Run the build
@@ -322,6 +325,8 @@ func (v VMImage) RunBuild(skipBuild bool) error {
 
 	// Convert the outputs
 	if builderString == "vbox" {
+		log.Println("Started VBox conversions...")
+
 		// Copy our OVA
 		tarFile := v.GetWorkDirPath() + "/convert.tar"
 		copyerr = copyFile(v.GetWorkDirPath()+"/packer-out/"+v.ImageName+"-vmifactory.ova", tarFile)
@@ -387,6 +392,12 @@ func (v VMImage) RunBuild(skipBuild bool) error {
 				return packErr
 			}
 		}
+		log.Println("VBox conversions completed...")
+		log.Println("VBox cleanup started...")
+		// Remove our work files
+		os.Remove(tarFile)
+		os.RemoveAll(disksDir)
+		log.Println("VBox cleanup completed...")
 
 	}
 	log.Println("Conversions completed...")
@@ -395,8 +406,38 @@ func (v VMImage) RunBuild(skipBuild bool) error {
 	if !ok {
 		return errors.New("Required key 'source'.'imagefile' not found")
 	}
-	os.Rename(v.GetWorkDirPath()+"/original.ova", v.GetWorkDirPath()+"/"+realName)
+
+	// Move the new version back to the original name for post-processing
+	if builderString == "vbox" {
+		// Remove our working copy
+		os.Remove(v.GetWorkDirPath() + "/original.ova")
+		// Move the new Packer copy out
+		copyerr = os.Rename(v.GetWorkDirPath()+"/packer-out/"+v.ImageName+"-vmifactory.ova", v.GetWorkDirPath()+"/"+realName)
+	} else {
+		return errors.New(builderString + " not currently supported")
+	}
 	log.Println("Renamed original file...")
+
+	// Move all the runonce to the used directory
+	runOnceScripts, err := ioutil.ReadDir(v.GetRunOncePath())
+	hadRunOnce := false
+	if err != nil {
+		return errors.New("Could not list the runOnce directory for the image")
+	}
+
+	for i := 0; i < len(runOnceScripts); i++ {
+		if !(runOnceScripts[i].IsDir()) {
+			oldPath := v.GetRunOncePath() + "/" + runOnceScripts[i].Name()
+			dt := time.Now()
+			newPath := v.GetRunOncePath() + "/used/" + dt.Format("2006-01-02-15.04.05") + runOnceScripts[i].Name()
+			os.Rename(oldPath, newPath)
+			hadRunOnce = true
+		}
+	}
+	if hadRunOnce {
+		log.Println("Moved runonce scripts...")
+	}
+
 	return nil
 }
 
