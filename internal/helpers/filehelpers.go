@@ -1,4 +1,4 @@
-package imagemanage
+package helpers
 
 import (
 	"archive/tar"
@@ -10,7 +10,7 @@ import (
 	"os"
 )
 
-func copyFile(src string, dst string) error {
+func CopyFile(src string, dst string) error {
 
 	source, oerr := os.Open(src)
 	if oerr != nil {
@@ -27,7 +27,7 @@ func copyFile(src string, dst string) error {
 	return copyerr
 }
 
-func tarAndGzipFiles(files []string, outputFilePath string) error {
+func TarAndGzipFiles(files []string, outputFilePath string) error {
 	outputFile, err := os.Create(outputFilePath)
 	if err != nil {
 		return err
@@ -58,7 +58,7 @@ func tarAndGzipFiles(files []string, outputFilePath string) error {
 	return nil
 }
 
-func getFileSHA256(filepath string) (string, error) {
+func GetFileSHA256(filepath string) (string, error) {
 	hasher := sha256.New()
 	inFile, err := ioutil.ReadFile(filepath)
 	hasher.Write(inFile)

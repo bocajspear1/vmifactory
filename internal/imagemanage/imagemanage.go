@@ -1,11 +1,9 @@
 package imagemanage
 
 import (
-	"archive/tar"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -13,6 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/bocajspear1/vmifactory/internal/converters"
+	"github.com/bocajspear1/vmifactory/internal/helpers"
 )
 
 // GetAvailableImages returns a list of images
@@ -286,7 +287,7 @@ func (v VMImage) RunBuild(skipBuild bool) error {
 
 	// Copy in the current image file into the work directory as our working copy
 	if builderString == "vbox" {
-		copyerr = copyFile(v.ImageRootDir+"/"+imagefilePath, v.GetWorkDirPath()+"/original.ova")
+		copyerr = helpers.CopyFile(v.ImageRootDir+"/"+imagefilePath, v.GetWorkDirPath()+"/original.ova")
 	} else {
 		return errors.New(builderString + " not currently supported")
 	}
@@ -319,7 +320,7 @@ func (v VMImage) RunBuild(skipBuild bool) error {
 		if builderString == "vbox" {
 			originalPath := v.GetWorkDirPath() + "/original.ova"
 			fakingPath := v.GetWorkDirPath() + "/packer-out/" + v.ImageName + "-vmifactory.ova"
-			copyerr = copyFile(originalPath, fakingPath)
+			copyerr = helpers.CopyFile(originalPath, fakingPath)
 		}
 	}
 
@@ -327,76 +328,28 @@ func (v VMImage) RunBuild(skipBuild bool) error {
 	if builderString == "vbox" {
 		log.Println("Started VBox conversions...")
 
-		// Copy our OVA
-		tarFile := v.GetWorkDirPath() + "/convert.tar"
-		copyerr = copyFile(v.GetWorkDirPath()+"/packer-out/"+v.ImageName+"-vmifactory.ova", tarFile)
+		ovaPath := v.GetWorkDirPath() + "/packer-out/" + v.ImageName + "-vmifactory.ova"
+		ovaDisks, copyErr := converters.VBoxExtractDisks(v.GetWorkDirPath(), ovaPath)
 
-		reader, err := os.Open(tarFile)
-		defer reader.Close()
-		if err != nil {
-			return err
-		}
-
-		disksDir := v.GetWorkDirPath() + "/ova-disks"
-
-		// Extract the disk(s)
-		tarReader := tar.NewReader(reader)
-		os.Mkdir(disksDir, 0777)
-
-		for {
-			tarHeader, err := tarReader.Next()
-			if err == io.EOF {
-				break // End of archive
-			} else if err != nil {
-				return err
-			}
-
-			if strings.Contains(tarHeader.Name, ".vmdk") {
-				destination, cerr := os.Create(disksDir + "/" + tarHeader.Name)
-				if cerr != nil {
-					return cerr
-				}
-				_, werr := io.Copy(destination, tarReader)
-				if werr != nil {
-					return werr
-				}
-			}
-		}
-
-		ovaDisks, err := ioutil.ReadDir(disksDir)
-		if err != nil {
-			return err
+		if copyErr != nil {
+			return copyErr
 		}
 
 		// Do conversion for KVM
 		kvmName, ok := v.Config.Out["kvm"]
 		if ok && kvmName != "" {
 			log.Println("Doing KVM conversion...")
-			convertedList := make([]string, len(ovaDisks))
-			log.Println("(KVM) Converting disks...")
-			// For each disk, make a QCOW2 copy
-			for i, diskFile := range ovaDisks {
-				newName := strings.ReplaceAll(diskFile.Name(), ".vmdk", ".qcow2")
-				convertedList[i] = disksDir + "/" + newName
-				cmd := exec.Command("qemu-img", "convert", "-O", "qcow2", disksDir+"/"+diskFile.Name(), disksDir+"/"+newName)
-				convertOut, err := cmd.Output()
-				if err != nil {
-					return err
-				}
-				fmt.Printf("%s", convertOut)
-			}
-			log.Println("(KVM) Building Gzipped Tar...")
-			// Tar and gzip the QCOW2 files
-			packErr := tarAndGzipFiles(convertedList, v.GetWorkDirPath()+"/"+kvmName)
-			if packErr != nil {
-				return packErr
+			cerr := converters.VBoxToKVM(ovaDisks, v.GetWorkDirPath()+"/"+kvmName)
+			if cerr != nil {
+				return cerr
 			}
 		}
+
 		log.Println("VBox conversions completed...")
-		log.Println("VBox cleanup started...")
+
 		// Remove our work files
-		os.Remove(tarFile)
-		os.RemoveAll(disksDir)
+		converters.VBoxCleanup(v.GetWorkDirPath())
+
 		log.Println("VBox cleanup completed...")
 
 	}
@@ -434,6 +387,7 @@ func (v VMImage) RunBuild(skipBuild bool) error {
 			hadRunOnce = true
 		}
 	}
+
 	if hadRunOnce {
 		log.Println("Moved runonce scripts...")
 	}
@@ -476,7 +430,7 @@ func (v VMImage) CommitBuild() error {
 			} else {
 				v.Config.Metadata[hypervisor+"_last_date"] = ""
 			}
-			fileHash, err := getFileSHA256(newImagefilePath)
+			fileHash, err := helpers.GetFileSHA256(newImagefilePath)
 			if err != nil {
 				return err
 			}
