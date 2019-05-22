@@ -88,12 +88,13 @@ func (v VMImage) generatePackerConfig() (string, error) {
 		return "", errors.New("Required key 'source'/'hypervisor' not found")
 	}
 
-	builderOut := make(map[string]string)
+	builderOut := make(map[string]interface{})
 
 	if builderString == "vbox" {
 		builderOut["type"] = "virtualbox-ovf"
 		builderOut["guest_additions_mode"] = "attach"
 		builderOut["format"] = "ova"
+		builderOut["headless"] = true
 		builderOut["source_path"], _ = filepath.Abs(v.GetWorkDirPath() + "/original.ova")
 	} else {
 		return "", errors.New("Builder is not supported")
