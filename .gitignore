@@ -6,3 +6,4 @@ images/*
 packer
 vmif-run
 vmif-web
+*.log

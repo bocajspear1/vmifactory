@@ -4,6 +4,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"log"
+	"os"
 	"strings"
 
 	"github.com/bocajspear1/vmifactory/internal/imagemanage"
@@ -37,7 +40,18 @@ func main() {
 	var listImages = flag.Bool("list", false, "List the known available images")
 	var runBuild = flag.String("run", "", "Set to run only one build instead of them all")
 
+	var logFilePath = flag.String("logfile", "./vmif-run.log", "File to log to")
+
 	flag.Parse()
+
+	// Setup logging to Stdout and file
+	logFile, err := os.OpenFile(*logFilePath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0660)
+	if err != nil {
+		panic(err)
+	}
+
+	mw := io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(mw)
 
 	if *runBuild != "" {
 		filteredImage := strings.ReplaceAll(*runBuild, ".", "")

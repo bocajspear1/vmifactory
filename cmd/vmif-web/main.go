@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -32,10 +33,14 @@ func getFileContentType(filePath string) (string, error) {
 	return contentType, nil
 }
 
+// Handles getting downloading images
 func getHandler(w http.ResponseWriter, r *http.Request) {
+	// Rudimentary security protections
 	reqPath := strings.ReplaceAll(r.URL.Path, "..", "")
+
+	// Parse the incoming URL
 	sections := strings.Split(reqPath[len("/get/"):], "/")
-	fmt.Println(len(sections))
+
 	if len(sections) != 2 {
 		fmt.Fprintln(w, "Invalid image file requested")
 		return
@@ -48,9 +53,11 @@ func getHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	imagePath := image.ImageRootDir + "/" + imageName
-	fmt.Println(imagePath)
+
+	// Check if the file actually exists
 	fileData, serr := os.Stat(imagePath)
 	if serr != nil {
+		log.Panicln("Could not find file " + imagePath)
 		fmt.Fprintln(w, "The image file was not found, please contact the administrator")
 		return
 	}
@@ -58,13 +65,16 @@ func getHandler(w http.ResponseWriter, r *http.Request) {
 
 	contentType, err := getFileContentType(imagePath)
 	if err != nil {
-		fmt.Println(err)
+		log.Panicln("Failed to get filetype of " + imagePath)
 		fmt.Fprintln(w, "Could not get image file type")
 		return
 	}
 
+	// Set more headers for the file
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(int64(fileData.Size()), 10))
+
+	log.Println("Downloading " + imagePath)
 
 	outFile, oerr := os.Open(imagePath)
 	if oerr != nil {
@@ -76,6 +86,7 @@ func getHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+// Handles the index page
 func mainHandler(w http.ResponseWriter, r *http.Request) {
 
 	pageTemplate, err := template.ParseFiles("./web/templates/template.html")
@@ -83,7 +94,9 @@ func mainHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Template failed")
 		return
 	}
+	log.Println("Accessed index")
 
+	// Prepare image data for the template
 	images := imagemanage.GetAvailableImages("./images")
 
 	imageDataList := make([]imagemanage.BuilderConfig, 0)
@@ -102,13 +115,34 @@ func mainHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fill out the template and return
 	pageTemplate.Execute(w, imageDataList)
 }
 
 func main() {
+
+	// Parse options
+	var listenAt = flag.String("listen", ":8080", "Address:port to listen at")
+	var logFilePath = flag.String("logfile", "./vmif-web.log", "File to log to")
+
+	flag.Parse()
+
+	// Setup logging to Stdout and file
+	logFile, err := os.OpenFile(*logFilePath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0660)
+	if err != nil {
+		panic(err)
+	}
+
+	mw := io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(mw)
+
+	// Setup the web server
 	fs := http.FileServer(http.Dir("web/static/"))
 	http.Handle("/static/", http.StripPrefix("/static/", fs))
 	http.HandleFunc("/get/", getHandler)
 	http.HandleFunc("/", mainHandler)
-	log.Fatal(http.ListenAndServe(":8080", nil))
+
+	// Start the web server
+	log.Println("Starting server, listening at " + *listenAt)
+	log.Fatal(http.ListenAndServe(*listenAt, nil))
 }
